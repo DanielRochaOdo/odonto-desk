@@ -30,15 +30,19 @@ MVP de suporte remoto com consentimento explícito, focado em qualidade de conex
 
 **Supabase (Banco + RLS)**
 1. Crie um projeto no Supabase.
-2. No SQL Editor do Supabase, execute o conteúdo de `supabase/migrations/20260223123000_init.sql`.
+2. No SQL Editor do Supabase, execute o conteúdo de:
+   - `supabase/migrations/20260223123000_init.sql`
+   - `supabase/migrations/20260223143000_user_codes.sql`
 3. Verifique se o Auth por Email está habilitado.
 
 **Edge Functions**
 1. Faça login no Supabase CLI: `supabase login`
 2. Conecte o projeto: `supabase link --project-ref SEU_PROJECT_REF`
-3. Faça deploy: `supabase functions deploy create-session`
-4. Faça deploy: `supabase functions deploy request-join`
-5. Faça deploy: `supabase functions deploy resolve-request`
+3. Defina o segredo do código da sessão:
+   - `supabase secrets set SESSION_CODE_SECRET=UMA_STRING_FORTE`
+4. Faça deploy: `supabase functions deploy create-session`
+5. Faça deploy: `supabase functions deploy request-join`
+6. Faça deploy: `supabase functions deploy resolve-request`
 
 **Variáveis Web**
 1. Copie `web/.env.example` para `web/.env`.
@@ -57,7 +61,7 @@ MVP de suporte remoto com consentimento explícito, focado em qualidade de conex
 
 **Fluxo do Cliente**
 1. Login
-2. Criar sessão
+2. Código fixo é gerado automaticamente no login
 3. Compartilhar o código com o atendente
 4. Aceitar a solicitação
 5. Encerrar quando terminar

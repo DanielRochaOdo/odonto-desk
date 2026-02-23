@@ -1,22 +1,35 @@
 import { supabase } from "./supabaseClient";
 
+async function getAuthHeaders() {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function createSession() {
-  const { data, error } = await supabase.functions.invoke("create-session");
+  const headers = await getAuthHeaders();
+  const { data, error } = await supabase.functions.invoke("create-session", {
+    headers,
+  });
   if (error) throw error;
   return data;
 }
 
 export async function requestJoin(code) {
+  const headers = await getAuthHeaders();
   const { data, error } = await supabase.functions.invoke("request-join", {
     body: { code },
+    headers,
   });
   if (error) throw error;
   return data;
 }
 
 export async function resolveRequest(requestId, action) {
+  const headers = await getAuthHeaders();
   const { data, error } = await supabase.functions.invoke("resolve-request", {
     body: { requestId, action },
+    headers,
   });
   if (error) throw error;
   return data;

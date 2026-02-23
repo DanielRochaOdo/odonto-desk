@@ -50,13 +50,10 @@ serve(async (req) => {
       );
     }
 
-    const nowIso = new Date().toISOString();
     const { data: session, error: sessionError } = await supabase
       .from("sessions")
       .select("id, status, expires_at, created_by")
       .eq("code", code)
-      .eq("status", "pending")
-      .gt("expires_at", nowIso)
       .maybeSingle();
 
     if (sessionError || !session) {

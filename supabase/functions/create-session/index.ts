@@ -3,38 +3,74 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { enforceRateLimit } from "../_shared/rateLimit.ts";
 import { getSupabaseClient, requireUser } from "../_shared/supabase.ts";
 
-const CODE_LENGTH = 6;
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_DIGITS = 8;
+const textEncoder = new TextEncoder();
 
-function generateCode(length = CODE_LENGTH) {
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  let code = "";
-  for (let i = 0; i < length; i += 1) {
-    code += CODE_ALPHABET[array[i] % CODE_ALPHABET.length];
-  }
-  return code;
+function formatNumericCode(value: bigint) {
+  const mod = 10n ** BigInt(CODE_DIGITS);
+  const numeric = (value % mod).toString().padStart(CODE_DIGITS, "0");
+  return numeric;
 }
 
-async function generateUniqueCode(supabase: any) {
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const code = generateCode();
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("id")
-      .eq("code", code)
-      .limit(1);
+async function generateCodeForUser(userId: string, attempt: number) {
+  const secret = Deno.env.get("SESSION_CODE_SECRET");
+  if (!secret) {
+    throw new Error("Missing SESSION_CODE_SECRET");
+  }
 
-    if (error) {
-      throw new Error(error.message);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  const payload = `${userId}:${attempt}`;
+  const signature = await crypto.subtle.sign("HMAC", key, textEncoder.encode(payload));
+  const bytes = new Uint8Array(signature);
+
+  let value = 0n;
+  for (let i = 0; i < 8; i += 1) {
+    value = (value << 8n) + BigInt(bytes[i]);
+  }
+
+  return formatNumericCode(value);
+}
+
+async function getOrCreateUserCode(supabase: any, userId: string) {
+  const { data: existing, error: existingError } = await supabase
+    .from("user_codes")
+    .select("code")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  if (existing?.code) {
+    return existing.code;
+  }
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const code = await generateCodeForUser(userId, attempt);
+    const { data, error } = await supabase
+      .from("user_codes")
+      .insert({ user_id: userId, code })
+      .select("code")
+      .single();
+
+    if (!error && data?.code) {
+      return data.code;
     }
 
-    if (!data || data.length === 0) {
-      return code;
+    if (error?.code !== "23505") {
+      throw new Error(error?.message ?? "Unable to allocate code.");
     }
   }
 
-  throw new Error("Unable to generate unique code.");
+  throw new Error("Unable to allocate unique code.");
 }
 
 serve(async (req) => {
@@ -76,7 +112,47 @@ serve(async (req) => {
     }
 
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    const code = await generateUniqueCode(supabase);
+    const code = await getOrCreateUserCode(supabase, user.id);
+
+    const { data: existingSession, error: existingSessionError } = await supabase
+      .from("sessions")
+      .select("id, code, status, expires_at")
+      .eq("created_by", user.id)
+      .in("status", ["pending", "active"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingSessionError) {
+      throw new Error(existingSessionError.message);
+    }
+
+    if (existingSession) {
+      const isExpired = new Date(existingSession.expires_at).getTime() <= Date.now();
+      if (!isExpired) {
+        return new Response(
+          JSON.stringify({
+            sessionId: existingSession.id,
+            code: existingSession.code,
+            status: existingSession.status,
+            expiresAt: existingSession.expires_at,
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      const { error: expireError } = await supabase
+        .from("sessions")
+        .update({ status: "ended" })
+        .eq("id", existingSession.id);
+
+      if (expireError) {
+        throw new Error(expireError.message);
+      }
+    }
 
     const { data: session, error: sessionError } = await supabase
       .from("sessions")

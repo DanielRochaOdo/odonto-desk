@@ -5,13 +5,16 @@ import AcceptModal from "../components/AcceptModal";
 import SessionStatusBadge from "../components/SessionStatusBadge";
 import { createSession, resolveRequest } from "../lib/sessionApi";
 import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../lib/auth";
 
 export default function ClientSession() {
+  const { user, loading: authLoading } = useAuth();
   const [session, setSession] = useState(null);
   const [requests, setRequests] = useState([]);
   const [activeRequest, setActiveRequest] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [initialized, setInitialized] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -100,6 +103,26 @@ export default function ClientSession() {
     }
   };
 
+  useEffect(() => {
+    if (authLoading || !user || session || loading || initialized) return;
+
+    const bootstrap = async () => {
+      setInitialized(true);
+      setLoading(true);
+      setError("");
+      try {
+        const data = await createSession();
+        setSession(data);
+      } catch (err) {
+        setError(err.message ?? "Erro ao criar sessão.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    bootstrap();
+  }, [authLoading, user, session, loading, initialized]);
+
   const handleAccept = async () => {
     if (!activeRequest) return;
     await resolveRequest(activeRequest.id, "accept");
@@ -125,18 +148,28 @@ export default function ClientSession() {
       <div className="grid lg:grid-cols-[1.3fr_0.7fr] gap-6">
         <div className="card space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-2xl">Criar sessão</h2>
+            <h2 className="font-display text-2xl">Sessão</h2>
             {session && <SessionStatusBadge status={session.status} />}
           </div>
           {!session ? (
             <>
               <p className="text-sm text-mist/70">
-                Gere um código de convite e aguarde a solicitação do atendente.
+                O código é gerado automaticamente e vinculado ao seu usuário.
               </p>
-              <button type="button" className="btn-primary" onClick={handleCreate} disabled={loading}>
-                {loading ? "Gerando..." : "Gerar código"}
-              </button>
-              {error && <p className="text-sm text-coral">{error}</p>}
+              {loading && <p className="text-sm text-mist/60">Gerando código...</p>}
+              {error && (
+                <div className="space-y-3">
+                  <p className="text-sm text-coral">{error}</p>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={handleCreate}
+                    disabled={loading}
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <div className="space-y-4">
