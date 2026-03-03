@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
 import ChatPanel from "../components/ChatPanel";
@@ -33,6 +33,8 @@ export default function SessionRoom() {
   const [events, setEvents] = useState([]);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+  const [shareError, setShareError] = useState("");
+  const [sharePending, setSharePending] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [remoteCursor, setRemoteCursor] = useState(null);
   const pcRef = useRef(null);
@@ -206,7 +208,6 @@ export default function SessionRoom() {
     if (role === "client") {
       const channel = pc.createDataChannel("control", { ordered: true });
       setupDataChannel(channel);
-      startScreenShare(pc);
     }
 
     return () => {
@@ -287,8 +288,26 @@ export default function SessionRoom() {
     };
   };
 
-  const startScreenShare = async (pc) => {
+  const startScreenShare = async () => {
+    if (sharePending) return;
+    setShareError("");
+    const pc = pcRef.current;
+    if (!pc) {
+      setShareError("Conexao WebRTC nao pronta. Tente novamente.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      const message = window.isSecureContext
+        ? "Seu navegador nao suporta compartilhamento de tela."
+        : "Compartilhamento exige HTTPS ou localhost.";
+      setShareError(message);
+      await logEvent(sessionId, user.id, "share_failed", { message });
+      return;
+    }
+
     try {
+      setSharePending(true);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 30 },
         audio: false,
@@ -310,7 +329,11 @@ export default function SessionRoom() {
         };
       });
     } catch (error) {
-      await logEvent(sessionId, user.id, "share_failed", { message: error.message });
+      const message = error?.message ?? "Falha ao compartilhar a tela.";
+      setShareError(message);
+      await logEvent(sessionId, user.id, "share_failed", { message });
+    } finally {
+      setSharePending(false);
     }
   };
 
@@ -374,7 +397,7 @@ export default function SessionRoom() {
     () =>
       messages.map((msg) => ({
         ...msg,
-        userLabel: msg.user_id === user.id ? "Você" : `${msg.user_id.slice(0, 8)}...`,
+        userLabel: msg.user_id === user.id ? "VocÃª" : `${msg.user_id.slice(0, 8)}...`,
       })),
     [messages, user.id],
   );
@@ -385,11 +408,11 @@ export default function SessionRoom() {
 
   if (!role) {
     return (
-      <AppShell title="Sessão pendente">
+      <AppShell title="SessÃ£o pendente">
         <div className="card">
-          <h2 className="font-display text-xl mb-2">Aguardando permissão</h2>
+          <h2 className="font-display text-xl mb-2">Aguardando permissÃ£o</h2>
           <p className="text-sm text-mist/70 mb-4">
-            Você ainda não é participante desta sessão. Aguarde o aceite do cliente.
+            VocÃª ainda nÃ£o Ã© participante desta sessÃ£o. Aguarde o aceite do cliente.
           </p>
           <button type="button" className="btn-secondary" onClick={() => navigate("/app")}>
             Voltar ao painel
@@ -401,7 +424,7 @@ export default function SessionRoom() {
 
   return (
     <AppShell
-      title="Sessão ativa"
+      title="SessÃ£o ativa"
       actions={
         <div className="flex items-center gap-3">
           <SessionStatusBadge status={session?.status ?? "pending"} />
@@ -423,8 +446,24 @@ export default function SessionRoom() {
         <MetricsBar metrics={metrics} iceState={iceState} quality={quality} onQualityChange={setQuality} />
         <div className="grid xl:grid-cols-[1.5fr_0.5fr] gap-6">
           <div className="space-y-6">
+            {role === "client" && !localStream && (
+              <div className="glass-panel p-4 space-y-3">
+                <p className="text-sm text-mist/70">
+                  Clique para iniciar o compartilhamento da sua tela.
+                </p>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={startScreenShare}
+                  disabled={sharePending}
+                >
+                  {sharePending ? "Iniciando..." : "Iniciar compartilhamento"}
+                </button>
+                {shareError && <p className="text-sm text-coral">{shareError}</p>}
+              </div>
+            )}
             <VideoStage
-              title={role === "client" ? "Tela do Cliente (você)" : "Tela do Cliente"}
+              title={role === "client" ? "Tela do Cliente (vocÃª)" : "Tela do Cliente"}
               stream={role === "client" ? localStream : remoteStream}
               cursor={role === "client" ? remoteCursor : cursor}
               onPointerMove={role === "agent" ? sendCursor : undefined}
@@ -437,7 +476,7 @@ export default function SessionRoom() {
                 <p className="font-semibold capitalize">{role}</p>
               </div>
               <div className="glass-panel p-4">
-                <p className="text-xs text-mist/60">Sessão</p>
+                <p className="text-xs text-mist/60">SessÃ£o</p>
                 <p className="font-semibold">{sessionId.slice(0, 8)}...</p>
               </div>
             </div>
@@ -454,3 +493,4 @@ export default function SessionRoom() {
     </AppShell>
   );
 }
+

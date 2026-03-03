@@ -15,6 +15,25 @@ export default function AgentSession() {
   useEffect(() => {
     if (!requestInfo?.requestId) return undefined;
 
+    let isActive = true;
+    const pollStatus = async () => {
+      const { data, error } = await supabase
+        .from("session_requests")
+        .select("id, status, session_id")
+        .eq("id", requestInfo.requestId)
+        .maybeSingle();
+
+      if (!isActive || error || !data) return;
+
+      if (data.status === "accepted") {
+        navigate(`/app/session/${data.session_id}`);
+      }
+      setRequestInfo((prev) => (prev ? { ...prev, status: data.status } : prev));
+    };
+
+    pollStatus();
+    const intervalId = setInterval(pollStatus, 3000);
+
     const channel = supabase
       .channel(`join-request-${requestInfo.requestId}`)
       .on(
@@ -35,6 +54,8 @@ export default function AgentSession() {
       .subscribe();
 
     return () => {
+      isActive = false;
+      clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
   }, [requestInfo?.requestId, requestInfo?.sessionId, navigate]);

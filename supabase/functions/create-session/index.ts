@@ -4,38 +4,22 @@ import { enforceRateLimit } from "../_shared/rateLimit.ts";
 import { getSupabaseClient, requireUser } from "../_shared/supabase.ts";
 
 const CODE_DIGITS = 8;
-const textEncoder = new TextEncoder();
+const CODE_MAX = 10 ** CODE_DIGITS;
 
-function formatNumericCode(value: bigint) {
-  const mod = 10n ** BigInt(CODE_DIGITS);
-  const numeric = (value % mod).toString().padStart(CODE_DIGITS, "0");
-  return numeric;
+function formatNumericCode(value: number) {
+  return String(value).padStart(CODE_DIGITS, "0");
 }
 
-async function generateCodeForUser(userId: string, attempt: number) {
-  const secret = Deno.env.get("SESSION_CODE_SECRET");
-  if (!secret) {
-    throw new Error("Missing SESSION_CODE_SECRET");
-  }
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    textEncoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-
-  const payload = `${userId}:${attempt}`;
-  const signature = await crypto.subtle.sign("HMAC", key, textEncoder.encode(payload));
-  const bytes = new Uint8Array(signature);
-
-  let value = 0n;
-  for (let i = 0; i < 8; i += 1) {
-    value = (value << 8n) + BigInt(bytes[i]);
-  }
-
-  return formatNumericCode(value);
+function generateRandomCode() {
+  const max = 2 ** 32;
+  const limit = Math.floor(max / CODE_MAX) * CODE_MAX;
+  const buffer = new Uint32Array(1);
+  let value = 0;
+  do {
+    crypto.getRandomValues(buffer);
+    value = buffer[0];
+  } while (value >= limit);
+  return formatNumericCode(value % CODE_MAX);
 }
 
 async function getOrCreateUserCode(supabase: any, userId: string) {
@@ -53,8 +37,8 @@ async function getOrCreateUserCode(supabase: any, userId: string) {
     return existing.code;
   }
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const code = await generateCodeForUser(userId, attempt);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const code = generateRandomCode();
     const { data, error } = await supabase
       .from("user_codes")
       .insert({ user_id: userId, code })
